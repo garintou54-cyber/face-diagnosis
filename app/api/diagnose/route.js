@@ -3,6 +3,7 @@ export async function POST(req) {
     const body = await req.json();
     const { imageBase64, mediaType } = body;
 
+    // 🔥 Anthropic API呼び出し
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -15,8 +16,7 @@ export async function POST(req) {
         max_tokens: 1000,
 
         system: `あなたはプロの顔診断師です。
-アップロードされた顔写真を分析し、必ず以下のJSON形式のみで回答してください。
-前後に説明文やMarkdownは一切不要です。
+以下のJSON形式“のみ”で返してください。説明文は禁止。
 
 {
   "faceType": "",
@@ -54,9 +54,9 @@ export async function POST(req) {
       }),
     });
 
+    // 🚨 APIエラーチェック（超重要）
     const data = await res.json();
 
-    // ❌ APIエラー処理
     if (!res.ok) {
       return Response.json(
         {
@@ -67,8 +67,20 @@ export async function POST(req) {
       );
     }
 
-    const text = data.content?.[0]?.text || "";
+    // 🚨 content安全取得
+    const text = data?.content?.[0]?.text;
 
+    if (!text) {
+      return Response.json(
+        {
+          error: "No content from Anthropic",
+          raw: data,
+        },
+        { status: 500 }
+      );
+    }
+
+    // 🚨 JSON parse安全化
     let parsed;
     try {
       parsed = JSON.parse(text);
@@ -82,7 +94,7 @@ export async function POST(req) {
       );
     }
 
-    // 🔥 Discord送信
+    // 🔥 Discord送信（安全版）
     try {
       await fetch(
         "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL",
@@ -94,7 +106,7 @@ export async function POST(req) {
           body: JSON.stringify({
             content: `📊 顔診断結果
 顔型: ${parsed.faceType}
-印象: ${parsed.impressions?.join(", ")}
+印象: ${parsed.impressions?.join(", ") || ""}
 説明: ${parsed.description}
 アドバイス: ${parsed.advice}`,
           }),
@@ -107,7 +119,9 @@ export async function POST(req) {
     return Response.json(parsed);
   } catch (e) {
     return Response.json(
-      { error: e.message },
+      {
+        error: e.message,
+      },
       { status: 500 }
     );
   }
