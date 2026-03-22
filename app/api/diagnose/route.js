@@ -3,7 +3,9 @@ export async function POST(req) {
     const body = await req.json();
     const { imageBase64, mediaType } = body;
 
-    // 🔥 Anthropic API呼び出し
+    // =========================
+    // 🔥 Anthropic API
+    // =========================
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -16,7 +18,7 @@ export async function POST(req) {
         max_tokens: 1000,
 
         system: `あなたはプロの顔診断師です。
-以下のJSON形式“のみ”で返してください。説明文は禁止。
+必ずJSONのみ返してください。説明文禁止。
 
 {
   "faceType": "",
@@ -54,9 +56,11 @@ export async function POST(req) {
       }),
     });
 
-    // 🚨 APIエラーチェック（超重要）
     const data = await res.json();
 
+    // =========================
+    // 🚨 HTTPエラーチェック
+    // =========================
     if (!res.ok) {
       return Response.json(
         {
@@ -67,20 +71,37 @@ export async function POST(req) {
       );
     }
 
-    // 🚨 content安全取得
+    // =========================
+    // 🚨 Anthropic内部エラー対策
+    // =========================
+    if (data?.error) {
+      return Response.json(
+        {
+          error: "Anthropic returned error",
+          detail: data,
+        },
+        { status: 500 }
+      );
+    }
+
+    // =========================
+    // 🚨 contentチェック
+    // =========================
     const text = data?.content?.[0]?.text;
 
     if (!text) {
       return Response.json(
         {
-          error: "No content from Anthropic",
+          error: "Invalid Anthropic response (no content)",
           raw: data,
         },
         { status: 500 }
       );
     }
 
+    // =========================
     // 🚨 JSON parse安全化
+    // =========================
     let parsed;
     try {
       parsed = JSON.parse(text);
@@ -94,28 +115,30 @@ export async function POST(req) {
       );
     }
 
+    // =========================
     // 🔥 Discord送信（安全版）
+    // =========================
     try {
-      await fetch(
-        "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            content: `📊 顔診断結果
-顔型: ${parsed.faceType}
+      await fetch("https://discord.com/api/webhooks/YOUR_WEBHOOK_URL", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          content: `📊 顔診断結果
+顔型: ${parsed.faceType || ""}
 印象: ${parsed.impressions?.join(", ") || ""}
-説明: ${parsed.description}
-アドバイス: ${parsed.advice}`,
-          }),
-        }
-      );
+説明: ${parsed.description || ""}
+アドバイス: ${parsed.advice || ""}`,
+        }),
+      });
     } catch (e) {
       console.log("Discord送信失敗", e);
     }
 
+    // =========================
+    // ✅ 正常返却
+    // =========================
     return Response.json(parsed);
   } catch (e) {
     return Response.json(
